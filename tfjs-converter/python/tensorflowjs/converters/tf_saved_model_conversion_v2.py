@@ -129,13 +129,14 @@ def _run_grappler(config, graph_def, graph, signature_def):
 
 def optimize_graph(graph, signature_def,
                    skip_op_check=False, strip_debug_ops=False,
-                   experiments=False):
+                   experiments=False, no_optimizer_constfold=False):
   """Takes a Python Graph object and optimizes the graph.
 
   Args:
     graph: The frozen graph to optimize.
     skip_op_check: Bool whether to skip the op check.
     strip_debug_ops: Bool whether to strip debug ops.
+    no_optimizer_constfold: Bool whether to run 'constfold' optimizer in grappler.
   """
 
   # Add a collection 'train_op' so that Grappler knows the outputs.
@@ -154,10 +155,14 @@ def optimize_graph(graph, signature_def,
   # first pass of grappler optimization, this is needed for batch norm folding.
   config = config_pb2.ConfigProto()
   rewriter_config = config.graph_options.rewrite_options
-  rewriter_config.optimizers[:] = [
+  optimizers = [
       'pruning', 'constfold', 'arithmetic', 'dependency', 'pruning',
       'constfold', 'arithmetic', 'dependency'
   ]
+  if no_optimizer_constfold:
+    optimizers = [opt for opt in optimizers if opt != 'constfold']
+  rewriter_config.optimizers[:] = optimizers
+
   if experiments:
     rewriter_config.experimental_disable_compressed_tensor_optimization = True
 
@@ -176,10 +181,13 @@ def optimize_graph(graph, signature_def,
       node.device = '/device:CPU:0'
 
   # rerun grappler to fuse conv2d/matmul
-  config.graph_options.rewrite_options.optimizers[:] = [
+  optimizers = [
       'remap',
       'constfold', 'arithmetic', 'dependency'
   ]
+  if no_optimizer_constfold:
+    optimizers = [opt for opt in optimizers if opt != 'constfold']
+  config.graph_options.rewrite_options.optimizers[:] = optimizers
 
   optimized_graph = _run_grappler(config, optimized_graph, graph, signature_def)
 
@@ -524,7 +532,8 @@ def convert_tf_frozen_model(frozen_model_path,
                             strip_debug_ops=False,
                             weight_shard_size_bytes=1024 * 1024 * 4,
                             experiments=False,
-                            metadata=None):
+                            metadata=None,
+                            no_optimizer_constfold=False):
   """Convert frozen model and check the model compatibility with Tensorflow.js.
   Optimize and convert the model to Tensorflow.js format, when the model passes
   the compatiblity check.
@@ -544,6 +553,7 @@ def convert_tf_frozen_model(frozen_model_path,
       The size of each weight file will be <= this value.
     experiments: Bool enable experimental features.
     metadata: User defined metadata map.
+    no_optimizer_constfold: Bool whether to run 'constfold' optimizer in grappler.
   """
 
   if not os.path.exists(output_dir):
@@ -557,7 +567,8 @@ def convert_tf_frozen_model(frozen_model_path,
   optimized_graph = optimize_graph(graph, signature,
                                    skip_op_check=skip_op_check,
                                    strip_debug_ops=strip_debug_ops,
-                                   experiments=experiments)
+                                   experiments=experiments,
+                                   no_optimizer_constfold=no_optimizer_constfold)
 
   weights = extract_weights(optimized_graph)
 
@@ -703,7 +714,8 @@ def _convert_tf_saved_model(output_dir,
                             control_flow_v2=False,
                             experiments=False,
                             metadata=None,
-                            frozen_graph_dir=None):
+                            frozen_graph_dir=None,
+                            no_optimizer_constfold=False):
   """Take a SavedModel or KerasModel and convert to Tensorflow.js graph model.
 
   Args:
@@ -731,6 +743,7 @@ def _convert_tf_saved_model(output_dir,
     metadata: User defined metadata map.
     frozen_graph_dir: The directory to keep the intermediate frozen graph of
       model.
+    no_optimizer_constfold: Bool whether to run 'constfold' optimizer in grappler.
   """
   if signature_def is None:
     signature_def = 'serving_default'
@@ -851,7 +864,8 @@ def _convert_tf_saved_model(output_dir,
   optimized_graph = optimize_graph(frozen_graph, signature,
                                    skip_op_check=skip_op_check,
                                    strip_debug_ops=strip_debug_ops,
-                                   experiments=experiments)
+                                   experiments=experiments,
+                                   no_optimizer_constfold=no_optimizer_constfold)
 
   initializer_graph_def = None
   initializer_signature_def = None
@@ -1038,7 +1052,8 @@ def convert_tf_hub_module_v1(module_path, output_dir,
                              skip_op_check=False, strip_debug_ops=False,
                              weight_shard_size_bytes=1024 * 1024 * 4,
                              experiments=False,
-                             metadata=None):
+                             metadata=None,
+                             no_optimizer_constfold=False):
   """Freeze the TF-Hub module and check compatibility with Tensorflow.js.
 
   Optimize and convert the TF-Hub module to Tensorflow.js format, if it passes
@@ -1060,6 +1075,7 @@ def convert_tf_hub_module_v1(module_path, output_dir,
       The size of each weight file will be <= this value.
     experiments: Bool enable experimental features.
     metadata: User defined metadata map.
+    no_optimizer_constfold: Bool whether to run 'constfold' optimizer in grappler.
   """
 
   if signature is None:
@@ -1098,7 +1114,8 @@ def convert_tf_hub_module_v1(module_path, output_dir,
     optimized_graph = optimize_graph(frozen_graph, signature,
                                      skip_op_check=skip_op_check,
                                      strip_debug_ops=strip_debug_ops,
-                                     experiments=experiments)
+                                     experiments=experiments,
+                                     no_optimizer_constfold=no_optimizer_constfold)
 
     weights = extract_weights(optimized_graph)
 
